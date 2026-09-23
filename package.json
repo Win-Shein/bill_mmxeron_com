@@ -1,0 +1,28 @@
+{
+  "name": "billing-system",
+  "version": "1.0.0",
+  "description": "Zoho-like billing & invoicing system built with Node.js, Express and SQLite",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "seed": "node db/seed.js"
+  },
+  "keywords": [
+    "billing",
+    "invoicing",
+    "sqlite",
+    "express"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "express-session": "^1.19.0",
+    "pdfkit": "^0.15.1"
+  }
+}

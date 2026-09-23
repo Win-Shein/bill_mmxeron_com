@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Billing System</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <span class="brand-mark">₿</span>
+        <span class="brand-name">Billing</span>
+      </div>
+      <nav>
+        <a data-route="dashboard" class="nav-link active"><span class="nav-ico">📊</span><span class="nav-txt" data-i18n="Dashboard">Dashboard</span></a>
+        <a data-route="invoices"  class="nav-link"><span class="nav-ico">🧾</span><span class="nav-txt" data-i18n="Invoices">Invoices</span></a>
+        <a data-route="customers" class="nav-link"><span class="nav-ico">👥</span><span class="nav-txt" data-i18n="Customers">Customers</span></a>
+        <a data-route="items"     class="nav-link"><span class="nav-ico">📦</span><span class="nav-txt" data-i18n="Items">Items</span></a>
+        <a data-route="payments"  class="nav-link"><span class="nav-ico">💵</span><span class="nav-txt" data-i18n="Payments">Payments</span></a>
+        <a data-route="reports"   class="nav-link"><span class="nav-ico">📈</span><span class="nav-txt" data-i18n="Reports">Reports</span></a>
+        <a data-route="settings"  class="nav-link"><span class="nav-ico">⚙️</span><span class="nav-txt" data-i18n="Settings">Settings</span></a>
+      </nav>
+      <div id="user-panel" class="user-panel"></div>
+      <div class="sidebar-foot">
+        <a href="https://mmxeron.com" target="_blank" rel="noopener" class="brand-credit">MMXERON.COM</a>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <button id="menu-toggle" class="icon-btn menu-toggle" aria-label="Menu">☰</button>
+        <h1 id="page-title">Dashboard</h1>
+        <div class="topbar-right">
+          <div id="clock" class="clock"></div>
+          <div id="topbar-actions"></div>
+          <button id="theme-toggle" class="icon-btn" title="Toggle light / dark">🌙</button>
+        </div>
+      </header>
+      <div id="view" class="view"></div>
+    </main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
