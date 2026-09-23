@@ -23,6 +23,9 @@ raw.exec('PRAGMA foreign_keys = ON;');
 const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
 raw.exec(schema);
 
+// Apply post-launch migrations (new columns on existing tables, etc.)
+require('./migrate').migrate(raw);
+
 const db = {
   prepare: (sql) => raw.prepare(sql),
   exec: (sql) => raw.exec(sql),

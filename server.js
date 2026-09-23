@@ -99,6 +99,7 @@ app.use("/api/customers", require("./routes/customers"));
 app.use("/api/items", require("./routes/items"));
 app.use("/api/invoices", require("./routes/invoices"));
 app.use("/api/payments", require("./routes/payments"));
+app.use("/api/settlements", require("./routes/settlements"));
 app.use("/api/reports", require("./routes/reports"));
 app.use("/api/settings", require("./routes/settings"));
 

@@ -50,6 +50,12 @@ CREATE TABLE IF NOT EXISTS settings (
   language        TEXT    NOT NULL DEFAULT 'en',
   logo_url        TEXT,
   notes           TEXT,
+  -- German tax compliance (Finanzamt / GoBD)
+  is_kleinunternehmer INTEGER NOT NULL DEFAULT 0,  -- § 19 UStG small-business regime
+  bank_name           TEXT,
+  bank_iban           TEXT,
+  bank_bic            TEXT,
+  bank_account_holder TEXT,
   updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -108,12 +114,25 @@ CREATE TABLE IF NOT EXISTS invoices (
   amount_paid    REAL    NOT NULL DEFAULT 0,
   notes          TEXT,
   terms          TEXT,
+  -- German tax compliance (Finanzamt / GoBD / UStG / cross-border to Myanmar)
+  issuer_tax_number     TEXT,                          -- Steuernummer / USt-IdNr snapshot at issue time
+  client_country        TEXT    NOT NULL DEFAULT 'Myanmar',
+  service_period_start  TEXT,                          -- Leistungszeitraum start
+  service_period_end    TEXT,                          -- Leistungszeitraum end
+  vat_rate              REAL    NOT NULL DEFAULT 0,     -- percentage, e.g. 0.00 for Drittland exports
+  vat_exemption_reason  TEXT,                           -- legal clause printed on the PDF
+  is_locked             INTEGER NOT NULL DEFAULT 0,     -- GoBD immutability once issued
+  original_invoice_id   INTEGER REFERENCES invoices(id), -- set on a Stornorechnung (credit note)
   created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at     TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (org_id, invoice_no)
 );
 CREATE INDEX IF NOT EXISTS idx_invoices_org ON invoices(org_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id);
+-- NOTE: the idx_invoices_original index (on original_invoice_id) is created
+-- by db/migrate.js instead, since that column may not exist yet on an
+-- already-deployed database at the time this file runs (migrations run
+-- after this schema.sql, once the column has definitely been added).
 
 -- ---------- Invoice line items ----------
 CREATE TABLE IF NOT EXISTS invoice_items (
@@ -143,3 +162,33 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 CREATE INDEX IF NOT EXISTS idx_payments_org ON payments(org_id);
 CREATE INDEX IF NOT EXISTS idx_payments_invoice ON payments(invoice_id);
+
+-- ---------- Payment settlements (EUR inflow tracking — Zuflussprinzip / EÜR) ----------
+-- Separate from `payments` (which track amounts against the invoice balance in the
+-- billed currency). This table records the actual bank-credited EUR amount used for
+-- German income tax reporting, including gateway fees as deductible expenses.
+CREATE TABLE IF NOT EXISTS payment_settlements (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  org_id             INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  invoice_id         INTEGER NOT NULL REFERENCES invoices(id) ON DELETE RESTRICT,
+  settlement_date    TEXT    NOT NULL,              -- Zuflussdatum (date credited)
+  billed_amount      REAL    NOT NULL,
+  billed_currency    TEXT    NOT NULL,
+  settled_amount_eur REAL    NOT NULL,               -- reported to Finanzamt
+  payment_method     TEXT,                           -- 'Wise', 'Bank Transfer', 'Stripe', ...
+  gateway_fee_eur    REAL    NOT NULL DEFAULT 0,      -- deductible Betriebsausgabe
+  transaction_ref    TEXT,
+  created_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_settlements_org ON payment_settlements(org_id);
+CREATE INDEX IF NOT EXISTS idx_settlements_invoice ON payment_settlements(invoice_id);
+
+-- ---------- Invoice numbering (per-year sequence, INV-YYYY-XXXX) ----------
+-- Drafts never consume a number; a number is reserved only at issue time so
+-- the legal sequence for each calendar year stays gapless (GoBD).
+CREATE TABLE IF NOT EXISTS invoice_sequences (
+  org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  year   TEXT    NOT NULL,
+  next   INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (org_id, year)
+);

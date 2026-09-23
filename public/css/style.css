@@ -166,7 +166,10 @@ textarea { resize: vertical; min-height: 70px; }
 .badge.partial { background: #fef3c7; color: #b45309; }
 .badge.paid    { background: #dcfce7; color: #15803d; }
 .badge.overdue { background: #fee2e2; color: #b91c1c; }
-.badge.void    { background: #e5e7eb; color: #6b7280; text-decoration: line-through; }
+.badge.void      { background: #e5e7eb; color: #6b7280; text-decoration: line-through; }
+.badge.cancelled { background: #fee2e2; color: #991b1b; text-decoration: line-through; }
+.vat-note { background: #fef9c3; color: #78350f; border-radius: 8px; padding: 10px 12px; font-size: 12.5px; margin-top: 12px; }
+.lock-note { color: #6b7280; font-size: 12px; margin-top: 4px; }
 
 /* ---------- Modal ---------- */
 .modal-overlay {

@@ -106,4 +106,47 @@ router.get('/by-item', (req, res) => {
   res.json(rows);
 });
 
+// German tax advisor export (EÜR / Zuflussprinzip) — CSV of settled EUR income
+router.get('/tax-export', (req, res) => {
+  const org = req.orgId;
+  const from = req.query.from || '1970-01-01';
+  const to = req.query.to || '2999-12-31';
+
+  const rows = db
+    .prepare(
+      `SELECT i.invoice_no, i.issue_date, s.settlement_date, c.name AS client_name, i.client_country,
+              s.billed_amount, s.billed_currency, s.settled_amount_eur, s.gateway_fee_eur,
+              i.vat_exemption_reason
+         FROM payment_settlements s
+         JOIN invoices i ON i.id = s.invoice_id
+         JOIN customers c ON c.id = i.customer_id
+        WHERE s.org_id = ? AND s.settlement_date BETWEEN ? AND ?
+        ORDER BY s.settlement_date, s.id`
+    )
+    .all(org, from, to);
+
+  const headers = [
+    'Invoice Number', 'Issue Date', 'Settlement Date (Zuflussdatum)', 'Client Name', 'Country',
+    'Billed Amount & Currency', 'Taxable Income in EUR', 'Gateway Fee in EUR', 'Tax Reference Clause',
+  ];
+  const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [headers.map(cell).join(',')];
+  let totalEur = 0, totalFee = 0;
+  for (const r of rows) {
+    totalEur += r.settled_amount_eur;
+    totalFee += r.gateway_fee_eur;
+    lines.push([
+      r.invoice_no, r.issue_date, r.settlement_date, r.client_name, r.client_country,
+      `${r.billed_amount} ${r.billed_currency}`, r.settled_amount_eur.toFixed(2), r.gateway_fee_eur.toFixed(2),
+      r.vat_exemption_reason || '',
+    ].map(cell).join(','));
+  }
+  lines.push(['', '', '', '', '', 'TOTAL', totalEur.toFixed(2), totalFee.toFixed(2), ''].map(cell).join(','));
+
+  const csv = '\uFEFF' + lines.join('\r\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="tax-export_${from}_${to}.csv"`);
+  res.send(csv);
+});
+
 module.exports = router;

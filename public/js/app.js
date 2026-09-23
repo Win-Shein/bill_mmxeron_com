@@ -103,7 +103,7 @@ const MM = {
   'Monthly Summary (လစဉ်ချုပ်)': 'လစဉ်ချုပ်', 'Overdue / Outstanding Invoices': 'ကျော်လွန် / ကျန်ရှိ လွှာများ',
   Current: 'လက်ရှိ', Month: 'လ', Billed: 'တောင်းခံ', Qty: 'အရေအတွက်', Revenue: 'ဝင်ငွေ', Item: 'ပစ္စည်း',
   // Payments / filters
-  'Search…': 'ရှာဖွေရန်…', 'All methods': 'နည်းလမ်းအားလုံး', cash: 'ငွေသား', bank: 'ဘဏ်', card: 'ကတ်', mobile: 'မိုဘိုင်း', other: 'အခြား',
+  'Search…': 'ရှာဖွေရန်…', 'All methods': 'နည်းလမ်းအားလုံး', paypal: 'PayPal', debitcard: 'Debit Card', bank: 'ဘဏ်',
   'No payments yet': 'ငွေပေးချေမှု မရှိသေးပါ',
   // Settings
   'Company Logo': 'ကုမ္ပဏီ Logo', 'Company Details': 'ကုမ္ပဏီ အချက်အလက်', 'Billing Preferences': 'ငွေတောင်းခံမှု ဆက်တင်',
@@ -483,7 +483,7 @@ async function renderInvoices() {
   if (invTo) qs.set('to', invTo);
   const rows = await get('/invoices?' + qs.toString());
 
-  const filters = ['', 'draft', 'sent', 'partial', 'paid', 'overdue', 'void'];
+  const filters = ['', 'draft', 'sent', 'partial', 'paid', 'overdue', 'cancelled', 'void'];
   const sumTotal = rows.reduce((a, r) => a + r.total, 0);
   const sumBalance = rows.reduce((a, r) => a + (r.total - r.amount_paid), 0);
 
@@ -519,9 +519,10 @@ async function renderInvoices() {
               <td class="num mono">${money(i.total)}</td>
               <td class="num mono">${money(i.total - i.amount_paid)}</td>
               <td class="num" style="white-space:nowrap">
-                ${canWrite() ? `<button class="btn btn-sm" data-edit="${i.id}" title="${t('Edit')}">✏️</button>` : ''}
+                ${canWrite() && !i.is_locked ? `<button class="btn btn-sm" data-edit="${i.id}" title="${t('Edit')}">✏️</button>` : ''}
                 <button class="btn btn-sm" data-print="${i.id}" title="Print / PDF">🖨️</button>
-                ${canWrite() ? `<button class="btn btn-sm btn-danger" data-del="${i.id}" title="${t('Delete')}">🗑️</button>` : ''}
+                ${canWrite() && !i.is_locked ? `<button class="btn btn-sm btn-danger" data-del="${i.id}" title="${t('Delete')}">🗑️</button>` : ''}
+                ${i.is_locked ? '<span class="muted" title="Issued & immutable">🔒</span>' : ''}
               </td>
             </tr>`).join('') || `<tr><td colspan="9" class="empty">${t('No data')}</td></tr>`}
         </tbody>
@@ -561,6 +562,9 @@ async function editInvoice(id) {
   const [customers, items, inv] = await Promise.all([
     get('/customers'), get('/items'), id ? get('/invoices/' + id) : Promise.resolve(null),
   ]);
+  if (inv && inv.is_locked) {
+    return toast('This invoice is issued and immutable. Use Cancel to create a correction.', 'error');
+  }
   const lines = inv ? inv.items : [];
 
   openModal({
@@ -577,6 +581,12 @@ async function editInvoice(id) {
         <div class="field"><label>${t('Issue Date')}</label><input id="in-issue" type="date" value="${esc(inv ? inv.issue_date : today())}"></div>
         <div class="field"><label>${t('Due Date')}</label><input id="in-due" type="date" value="${esc(inv ? inv.due_date || '' : '')}"></div>
       </div>
+      <div class="form-row-3">
+        <div class="field"><label>${t('Client Country')}</label><input id="in-country" value="${esc(inv ? inv.client_country || '' : 'Myanmar')}" placeholder="Myanmar"></div>
+        <div class="field"><label>${t('Service Period Start')}</label><input id="in-svc-start" type="date" value="${esc(inv ? inv.service_period_start || '' : '')}"></div>
+        <div class="field"><label>${t('Service Period End')}</label><input id="in-svc-end" type="date" value="${esc(inv ? inv.service_period_end || '' : '')}"></div>
+      </div>
+      <div class="muted" style="font-size:12px;margin:-8px 0 4px">${t('Non-EU clients (e.g. Myanmar) are automatically VAT-exempt (§ 3a Abs. 2 UStG) when this invoice is issued. Service period is required before issuing.')}</div>
 
       <table class="line-table">
         <thead><tr><th class="col-desc">${t('Item / Description')}</th><th>${t('Qty')}</th><th>${t('Price')}</th><th>${t('Tax %')}</th><th class="num">${t('Amount')}</th><th></th></tr></thead>
@@ -663,6 +673,9 @@ async function editInvoice(id) {
     const payload = {
       customer_id, issue_date: $('#in-issue').value, due_date: $('#in-due').value || null,
       discount: $('#in-discount').value, notes: $('#in-notes').value, terms: $('#in-terms').value,
+      client_country: $('#in-country').value || 'Myanmar',
+      service_period_start: $('#in-svc-start').value || null,
+      service_period_end: $('#in-svc-end').value || null,
       items: lineItems,
     };
     try {
@@ -679,7 +692,10 @@ async function viewInvoice(id) {
   const inv = await get('/invoices/' + id);
   const c = inv.customer;
   const balance = inv.total - inv.amount_paid;
-  const statusButtons = canWrite() ? ['draft', 'sent', 'void'].filter((s) => s !== inv.status)
+  const isDraft = !inv.is_locked;
+  const isCancelled = inv.status === 'cancelled';
+  const isStorno = !!inv.original_invoice_id;
+  const statusButtons = canWrite() && isDraft ? ['void'].filter((s) => s !== inv.status)
     .map((s) => `<button class="btn btn-sm" data-status="${s}">${statusLabel(s)}</button>`).join('') : '';
 
   openModal({
@@ -692,11 +708,14 @@ async function viewInvoice(id) {
           <strong>${esc(c.name)}</strong>
           <div class="muted">${esc(c.company || '')}</div>
           <div class="muted">${esc(c.email || '')}</div>
+          <div class="muted">${esc(inv.client_country || '')}</div>
         </div>
         <div class="right">
-          <div>${badge(inv.status)}</div>
+          <div>${badge(inv.status)} ${isDraft ? '' : '<span title="Issued & immutable">🔒</span>'}</div>
           <div class="muted" style="margin-top:6px">${t('Issue')}: ${esc(inv.issue_date)}</div>
           <div class="muted">${t('Due')}: ${esc(inv.due_date || '—')}</div>
+          ${(inv.service_period_start || inv.service_period_end) ? `<div class="muted">${t('Service Period')}: ${esc(inv.service_period_start || '—')} – ${esc(inv.service_period_end || '—')}</div>` : ''}
+          ${isStorno && inv.original_invoice_no ? `<div class="muted">Cancels: ${esc(inv.original_invoice_no)}</div>` : ''}
         </div>
       </div>
       <div class="table-wrap" style="box-shadow:none">
@@ -710,22 +729,36 @@ async function viewInvoice(id) {
       <div class="totals-box" style="margin-top:14px">
         <div class="row"><span>${t('Subtotal')}</span><span class="mono">${money(inv.subtotal)}</span></div>
         ${inv.discount ? `<div class="row"><span>${t('Discount')}</span><span class="mono">- ${money(inv.discount)}</span></div>` : ''}
-        <div class="row"><span>${t('Tax')}</span><span class="mono">${money(inv.tax_total)}</span></div>
+        <div class="row"><span>${t('Tax')} (${inv.vat_rate ?? 0}%)</span><span class="mono">${money(inv.tax_total)}</span></div>
         <div class="row grand"><span>${t('Total')}</span><span class="mono">${money(inv.total)}</span></div>
         <div class="row"><span>${t('Paid')}</span><span class="mono">${money(inv.amount_paid)}</span></div>
         <div class="row" style="font-weight:700"><span>${t('Balance Due')}</span><span class="mono">${money(balance)}</span></div>
       </div>
+      ${inv.vat_exemption_reason ? `<div class="vat-note">${esc(inv.vat_exemption_reason)}</div>` : ''}
+      ${isDraft ? `<div class="lock-note">${t('Draft — editable. Issue to lock and assign the official sequential invoice number.')}</div>` : ''}
       ${inv.payments.length ? `
         <h3 class="card-title" style="margin-top:20px">${t('Payments')}</h3>
         <table>
           <thead><tr><th>${t('Date')}</th><th>${t('Method')}</th><th>${t('Reference')}</th><th class="num">${t('Amount')}</th><th></th></tr></thead>
-          <tbody>${inv.payments.map((p) => `<tr><td>${esc(p.paid_at)}</td><td>${methodIcon[p.method] || ''} ${t(p.method)}</td><td>${esc(p.reference || '')}</td><td class="num mono">${money(p.amount)}</td><td class="num">${canWrite() ? `<button class="btn btn-sm btn-danger" data-delpay="${p.id}">×</button>` : ''}</td></tr>`).join('')}</tbody>
+          <tbody>${inv.payments.map((p) => `<tr><td>${esc(p.paid_at)}</td><td>${methodIcon[p.method] || ''} ${esc(methodLabel(p.method))}</td><td>${esc(p.reference || '')}</td><td class="num mono">${money(p.amount)}</td><td class="num">${canWrite() ? `<button class="btn btn-sm btn-danger" data-delpay="${p.id}">×</button>` : ''}</td></tr>`).join('')}</tbody>
+        </table>` : ''}
+      ${!isDraft && !isStorno ? `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px">
+          <h3 class="card-title" style="margin:0">${t('Settlements')} <span class="muted" style="font-weight:400;font-size:11px">(EUR / Zuflussprinzip)</span></h3>
+          ${canWrite() ? `<button class="btn btn-sm" id="add-settlement">${t('+ Add Settlement')}</button>` : ''}
+        </div>
+        <table>
+          <thead><tr><th>${t('Settlement Date')}</th><th>${t('Billed Amount')}</th><th class="num">Settled (EUR)</th><th class="num">Fee (EUR)</th><th>${t('Method')}</th><th>${t('Reference')}</th><th></th></tr></thead>
+          <tbody>${(inv.settlements || []).map((s) => `<tr><td>${esc(s.settlement_date)}</td><td>${fmt(s.billed_amount)} ${esc(s.billed_currency)}</td><td class="num mono">€ ${fmt(s.settled_amount_eur)}</td><td class="num mono">€ ${fmt(s.gateway_fee_eur)}</td><td>${esc(s.payment_method || '')}</td><td>${esc(s.transaction_ref || '')}</td><td>${canWrite() ? `<button class="btn btn-sm btn-danger" data-delsettle="${s.id}">×</button>` : ''}</td></tr>`).join('') || `<tr><td colspan="7" class="muted">${t('No data')}</td></tr>`}</tbody>
         </table>` : ''}`,
     footHTML: `
       <button class="btn" onclick="window.open('/api/invoices/${inv.id}/pdf','_blank')">📄 PDF</button>
       ${statusButtons}
-      ${canWrite() ? `<button class="btn btn-sm" data-edit="${inv.id}">${t('Edit')}</button>` : ''}
-      ${canWrite() && balance > 0 && inv.status !== 'void' ? `<button class="btn btn-primary" id="record-pay">💵 ${t('Record Payment')}</button>` : ''}`,
+      ${canWrite() && isDraft ? `<button class="btn btn-sm" data-edit="${inv.id}">${t('Edit')}</button>` : ''}
+      ${canWrite() && isDraft ? `<button class="btn btn-primary" id="issue-inv">🚀 ${t('Issue')}</button>` : ''}
+      ${canWrite() && !isDraft && !isCancelled && !isStorno ? `<button class="btn btn-danger" id="cancel-inv">🧾 ${t('Cancel (Storno)')}</button>` : ''}
+      ${canWrite() && balance > 0 && isDraft ? `<button class="btn btn-primary" id="record-pay">💵 ${t('Record Payment')}</button>` : ''}
+      ${canWrite() && balance > 0 && !isDraft && !isCancelled ? `<button class="btn btn-primary" id="record-pay">💵 ${t('Record Payment')}</button>` : ''}`,
   });
 
   $$('[data-status]').forEach((b) => b.onclick = async () => {
@@ -737,8 +770,67 @@ async function viewInvoice(id) {
     if (!confirm('Delete this payment?')) return;
     await del('/payments/' + b.dataset.delpay); toast('Payment removed', 'success'); closeModal(); viewInvoice(inv.id);
   });
+  $$('[data-delsettle]').forEach((b) => b.onclick = async () => {
+    if (!confirm('Delete this settlement record?')) return;
+    await del('/settlements/' + b.dataset.delsettle); toast('Settlement removed', 'success'); closeModal(); viewInvoice(inv.id);
+  });
   const rp = $('#record-pay');
   if (rp) rp.onclick = () => recordPayment(inv);
+  const issueBtn = $('#issue-inv');
+  if (issueBtn) issueBtn.onclick = async () => {
+    if (!confirm('Issue this invoice? It will be locked and assigned an official sequential number. This cannot be undone.')) return;
+    try {
+      await post('/invoices/' + inv.id + '/issue');
+      toast('Invoice issued', 'success'); closeModal(); renderInvoices();
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  const cancelBtn = $('#cancel-inv');
+  if (cancelBtn) cancelBtn.onclick = async () => {
+    if (!confirm('Cancel this invoice? A Stornorechnung (credit note) will be created automatically.')) return;
+    try {
+      await post('/invoices/' + inv.id + '/cancel');
+      toast('Invoice cancelled — Stornorechnung created', 'success'); closeModal(); renderInvoices();
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  const addSettle = $('#add-settlement');
+  if (addSettle) addSettle.onclick = () => addSettlement(inv);
+}
+
+function addSettlement(inv) {
+  openModal({
+    title: `${t('Add Settlement')} — ${inv.invoice_no}`,
+    bodyHTML: `
+      <div class="form-row">
+        <div class="field"><label>${t('Settlement Date')}</label><input id="st-date" type="date" value="${today()}"></div>
+        <div class="field"><label>${t('Method')}</label><input id="st-method" placeholder="Wise / Bank Transfer / Stripe"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>${t('Billed Amount')}</label><input id="st-billed" type="number" step="0.01" value="${inv.total}"></div>
+        <div class="field"><label>${t('Billed Currency')}</label><input id="st-currency" value="${esc(inv.currency)}"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Settled Amount (EUR)</label><input id="st-eur" type="number" step="0.01"></div>
+        <div class="field"><label>Gateway Fee (EUR)</label><input id="st-fee" type="number" step="0.01" value="0"></div>
+      </div>
+      <div class="field"><label>${t('Reference')}</label><input id="st-ref"></div>`,
+    footHTML: `<button class="btn" id="st-cancel">${t('Cancel')}</button><button class="btn btn-primary" id="st-save">${t('Save')}</button>`,
+  });
+  $('#st-cancel').onclick = () => { closeModal(); viewInvoice(inv.id); };
+  $('#st-save').onclick = async () => {
+    try {
+      await post('/settlements', {
+        invoice_id: inv.id,
+        settlement_date: $('#st-date').value,
+        billed_amount: $('#st-billed').value,
+        billed_currency: $('#st-currency').value,
+        settled_amount_eur: $('#st-eur').value,
+        gateway_fee_eur: $('#st-fee').value,
+        payment_method: $('#st-method').value,
+        transaction_ref: $('#st-ref').value,
+      });
+      toast('Settlement recorded', 'success'); closeModal(); viewInvoice(inv.id);
+    } catch (e) { toast(e.message, 'error'); }
+  };
 }
 
 function recordPayment(inv) {
@@ -752,7 +844,7 @@ function recordPayment(inv) {
       </div>
       <div class="form-row">
         <div class="field"><label>${t('Method')}</label>
-          <select id="p-method">${PAY_METHODS.map((m) => `<option value="${m}">${methodIcon[m]} ${t(m)}</option>`).join('')}</select>
+          <select id="p-method">${PAY_METHODS.map((m) => `<option value="${m}">${methodIcon[m]} ${methodLabel(m)}</option>`).join('')}</select>
         </div>
         <div class="field"><label>${t('Reference')}</label><input id="p-ref"></div>
       </div>
@@ -774,8 +866,10 @@ function recordPayment(inv) {
 /* ============================================================
    Payments (global list)
    ============================================================ */
-const PAY_METHODS = ['cash', 'bank', 'card', 'mobile', 'other'];
-const methodIcon = { cash: '💵', bank: '🏦', card: '💳', mobile: '📱', other: '🔁' };
+const PAY_METHODS = ['paypal', 'debitcard', 'bank'];
+const methodIcon = { paypal: '🅿️', debitcard: '💳', bank: '🏦' };
+const METHOD_LABELS = { paypal: 'PayPal', debitcard: 'Debit Card', bank: 'Bank' };
+const methodLabel = (m) => (LANG === 'my' ? (MM[m] || METHOD_LABELS[m] || m) : (METHOD_LABELS[m] || m));
 let payMethod = '';
 let paySearch = '';
 
@@ -792,7 +886,7 @@ route('payments', async () => {
       <input class="search" id="pay-search" placeholder="${t('Search…')}" value="${esc(paySearch)}">
       <select id="pay-method" style="max-width:180px">
         <option value="">${t('All methods')}</option>
-        ${PAY_METHODS.map((m) => `<option value="${m}" ${payMethod === m ? 'selected' : ''}>${methodIcon[m]} ${t(m)}</option>`).join('')}
+        ${PAY_METHODS.map((m) => `<option value="${m}" ${payMethod === m ? 'selected' : ''}>${methodIcon[m]} ${methodLabel(m)}</option>`).join('')}
       </select>
       <span class="spacer"></span>
       <button class="btn btn-sm" id="pay-export">${t('⬇ Export Excel')}</button>
@@ -807,7 +901,7 @@ route('payments', async () => {
               <td>${esc(p.paid_at)}</td>
               <td><a class="link" data-inv="${p.invoice_id}">${esc(p.invoice_no)}</a></td>
               <td>${esc(p.customer_name)}</td>
-              <td>${methodIcon[p.method] || ''} ${t(p.method)}</td>
+              <td>${methodIcon[p.method] || ''} ${esc(methodLabel(p.method))}</td>
               <td>${esc(p.reference || '')}</td>
               <td class="num mono">${money(p.amount)}</td>
             </tr>`).join('') || `<tr><td colspan="7" class="empty">${t('No payments yet')}</td></tr>`}
@@ -848,6 +942,8 @@ route('reports', async () => {
       <button class="btn btn-sm" id="rep-month">${t('This Month')}</button>
       <button class="btn btn-sm" id="rep-year">${t('This Year')}</button>
       <button class="btn btn-sm" id="rep-all">${t('All')}</button>
+      <span class="spacer"></span>
+      <button class="btn btn-sm" id="rep-tax-export">📑 ${t('Tax Export (EÜR)')}</button>
     </div>
 
     <div class="grid-2">
@@ -924,6 +1020,12 @@ route('reports', async () => {
   $('#rep-month').onclick = () => { repFrom = today().slice(0, 8) + '01'; repTo = today(); navigate('reports'); };
   $('#rep-year').onclick = () => { repFrom = today().slice(0, 4) + '-01-01'; repTo = today(); navigate('reports'); };
   $('#rep-all').onclick = () => { repFrom = ''; repTo = ''; navigate('reports'); };
+  $('#rep-tax-export').onclick = () => {
+    const eq = new URLSearchParams();
+    if (repFrom) eq.set('from', repFrom);
+    if (repTo) eq.set('to', repTo);
+    window.open('/api/reports/tax-export' + (eq.toString() ? '?' + eq.toString() : ''), '_blank');
+  };
   $('#rep-export-month').onclick = () => exportCSV(
     `monthly_summary_${repFrom || 'all'}_${repTo || 'all'}.csv`,
     ['#', 'Month', 'Invoices', 'Billed', 'Collected', 'Outstanding'],
@@ -995,7 +1097,21 @@ route('settings', async () => {
       </div>
       <div class="form-row">
         <div class="field"><label>Invoice Prefix</label><input id="s-prefix" value="${f('invoice_prefix')}"></div>
-        <div class="field"><label>Next Invoice #</label><input id="s-next" type="number" value="${f('invoice_next')}"></div>
+        <div class="field"><label>Numbering</label><div class="muted" style="font-size:12px;padding-top:8px">Automatic: <code>INV-YYYY-XXXX</code> (per-year sequence, no gaps)</div></div>
+      </div>
+
+      <h3 class="card-title" style="margin-top:20px">German Tax Compliance (Finanzamt)</h3>
+      <div class="field">
+        <label><input type="checkbox" id="s-klein" ${s.is_kleinunternehmer ? 'checked' : ''}> Kleinunternehmer (§ 19 UStG) — no VAT charged on any invoice</label>
+      </div>
+      <div class="muted" style="font-size:12px;margin:-4px 0 10px">Non-EU clients (e.g. Myanmar) are always VAT-exempt (§ 3a Abs. 2 UStG) regardless of this setting.</div>
+      <div class="form-row">
+        <div class="field"><label>Bank Name</label><input id="s-bank-name" value="${f('bank_name')}"></div>
+        <div class="field"><label>Account Holder</label><input id="s-bank-holder" value="${f('bank_account_holder')}"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>IBAN</label><input id="s-bank-iban" value="${f('bank_iban')}"></div>
+        <div class="field"><label>BIC / SWIFT</label><input id="s-bank-bic" value="${f('bank_bic')}"></div>
       </div>
 
       <h3 class="card-title" style="margin-top:20px">${t('Language')} &amp; Theme</h3>
@@ -1060,8 +1176,11 @@ route('settings', async () => {
       company_name: $('#s-name').value, tax_number: $('#s-tax').value, email: $('#s-email').value,
       phone: $('#s-phone').value, address: $('#s-address').value, city: $('#s-city').value,
       country: $('#s-country').value, currency: $('#s-cur').value, currency_symbol: $('#s-sym').value,
-      default_tax: $('#s-dtax').value, invoice_prefix: $('#s-prefix').value, invoice_next: $('#s-next').value,
+      default_tax: $('#s-dtax').value, invoice_prefix: $('#s-prefix').value,
       language: $('#s-lang').value, logo_url: logoData,
+      is_kleinunternehmer: $('#s-klein').checked,
+      bank_name: $('#s-bank-name').value, bank_account_holder: $('#s-bank-holder').value,
+      bank_iban: $('#s-bank-iban').value, bank_bic: $('#s-bank-bic').value,
     };
     try { SETTINGS = await put('/settings', payload); applyBranding(); toast('Settings saved', 'success'); }
     catch (e) { toast(e.message, 'error'); }

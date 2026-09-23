@@ -43,7 +43,7 @@ router.post('/', (req, res) => {
       org: req.orgId,
       invoice_id: b.invoice_id,
       amount,
-      method: b.method || 'cash',
+      method: b.method || 'bank',
       reference: b.reference || null,
       paid_at: b.paid_at || new Date().toISOString().slice(0, 10),
       notes: b.notes || null,

@@ -17,7 +17,8 @@ db.exec("DELETE FROM sqlite_sequence WHERE name NOT NULL");
 
 const org = db.prepare('INSERT INTO organizations (name) VALUES (?)').run('My Company').lastInsertRowid;
 
-db.prepare('INSERT INTO settings (org_id, company_name) VALUES (?, ?)').run(org, 'My Company');
+db.prepare('INSERT INTO settings (org_id, company_name, currency, currency_symbol) VALUES (?, ?, ?, ?)')
+  .run(org, 'My Company', 'EUR', '€');
 
 db.prepare('INSERT INTO users (org_id, email, password_hash, name) VALUES (?,?,?,?)')
   .run(org, 'admin@example.com', hashPassword('admin1234'), 'Admin');
@@ -58,7 +59,7 @@ function line(name, qty) {
   return { item_id: it.id, description: it.name, quantity: qty, unit_price: it.price, tax_rate: it.tax_rate };
 }
 function makeInvoice({ customer_id, issue_date, due_date, status, lines, pay }) {
-  const no = nextInvoiceNo(org);
+  const no = nextInvoiceNo(org, issue_date.slice(0, 4));
   const id = db.prepare(
     `INSERT INTO invoices (org_id, invoice_no, customer_id, issue_date, due_date, status, currency)
      VALUES (?,?,?,?,?,?,'EUR')`

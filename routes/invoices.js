@@ -2,7 +2,9 @@
 
 const express = require('express');
 const db = require('../db/database');
-const { recalcInvoice, replaceLineItems, nextInvoiceNo } = require('../lib/invoiceService');
+const {
+  recalcInvoice, replaceLineItems, draftInvoiceNo, issueInvoice, cancelInvoice,
+} = require('../lib/invoiceService');
 const { buildInvoicePdf } = require('../lib/pdf');
 
 const router = express.Router();
@@ -17,6 +19,13 @@ function loadFull(id, orgId) {
   inv.payments = db
     .prepare('SELECT * FROM payments WHERE invoice_id = ? ORDER BY paid_at DESC, id DESC')
     .all(id);
+  inv.settlements = db
+    .prepare('SELECT * FROM payment_settlements WHERE invoice_id = ? ORDER BY settlement_date DESC, id DESC')
+    .all(id);
+  if (inv.original_invoice_id) {
+    const orig = db.prepare('SELECT invoice_no FROM invoices WHERE id = ?').get(inv.original_invoice_id);
+    inv.original_invoice_no = orig ? orig.invoice_no : null;
+  }
   return inv;
 }
 
@@ -50,7 +59,10 @@ router.get('/:id', (req, res) => {
   res.json(inv);
 });
 
-// Create
+// Create — always starts as an editable DRAFT. Drafts get a temporary
+// placeholder invoice number; the real sequential number is only assigned
+// when the invoice is issued (see POST /:id/issue), so deleting a draft
+// never leaves a gap in the legal numbering sequence (GoBD).
 router.post('/', (req, res) => {
   const b = req.body;
   if (!b.customer_id) return res.status(400).json({ error: 'customer_id is required' });
@@ -58,26 +70,29 @@ router.post('/', (req, res) => {
   if (!customer) return res.status(400).json({ error: 'Customer not found' });
 
   const settings = db.prepare('SELECT * FROM settings WHERE org_id = ?').get(req.orgId);
-  const invoiceNo = b.invoice_no || nextInvoiceNo(req.orgId);
 
   const create = db.transaction(() => {
     const info = db
       .prepare(
         `INSERT INTO invoices
-           (org_id, invoice_no, customer_id, issue_date, due_date, status, currency, discount, notes, terms)
-         VALUES (@org, @invoice_no, @customer_id, @issue_date, @due_date, @status, @currency, @discount, @notes, @terms)`
+           (org_id, invoice_no, customer_id, issue_date, due_date, status, currency, discount, notes, terms,
+            client_country, service_period_start, service_period_end)
+         VALUES (@org, @invoice_no, @customer_id, @issue_date, @due_date, 'draft', @currency, @discount, @notes, @terms,
+                 @client_country, @service_period_start, @service_period_end)`
       )
       .run({
         org: req.orgId,
-        invoice_no: invoiceNo,
+        invoice_no: draftInvoiceNo(),
         customer_id: b.customer_id,
         issue_date: b.issue_date || new Date().toISOString().slice(0, 10),
         due_date: b.due_date || null,
-        status: b.status || 'draft',
         currency: b.currency || settings.currency,
         discount: Number(b.discount) || 0,
         notes: b.notes || null,
         terms: b.terms || null,
+        client_country: b.client_country || customer.country || 'Myanmar',
+        service_period_start: b.service_period_start || null,
+        service_period_end: b.service_period_end || null,
       });
     const id = info.lastInsertRowid;
     replaceLineItems(id, b.items || []);
@@ -85,21 +100,19 @@ router.post('/', (req, res) => {
     return id;
   });
 
-  try {
-    const id = create();
-    res.status(201).json(loadFull(id, req.orgId));
-  } catch (e) {
-    if (String(e.message).includes('UNIQUE')) {
-      return res.status(409).json({ error: 'Invoice number already exists' });
-    }
-    throw e;
-  }
+  const id = create();
+  res.status(201).json(loadFull(id, req.orgId));
 });
 
-// Update
+// Update — only permitted while the invoice is still a DRAFT. Once issued,
+// GoBD requires the document to be immutable; corrections must go through
+// POST /:id/cancel (Stornorechnung) instead.
 router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM invoices WHERE id = ? AND org_id = ?').get(req.params.id, req.orgId);
   if (!existing) return res.status(404).json({ error: 'Invoice not found' });
+  if (existing.is_locked) {
+    return res.status(409).json({ error: 'Invoice is issued and immutable. Use Cancel to create a correction (Stornorechnung).' });
+  }
   const b = req.body;
   if (b.customer_id) {
     const c = db.prepare('SELECT id FROM customers WHERE id = ? AND org_id = ?').get(b.customer_id, req.orgId);
@@ -111,6 +124,8 @@ router.put('/:id', (req, res) => {
       `UPDATE invoices
          SET customer_id=@customer_id, issue_date=@issue_date, due_date=@due_date,
              status=@status, currency=@currency, discount=@discount, notes=@notes, terms=@terms,
+             client_country=@client_country, service_period_start=@service_period_start,
+             service_period_end=@service_period_end,
              updated_at=datetime('now')
        WHERE id=@id AND org_id=@org`
     ).run({
@@ -123,6 +138,9 @@ router.put('/:id', (req, res) => {
       discount: b.discount != null ? Number(b.discount) : existing.discount,
       notes: b.notes ?? existing.notes,
       terms: b.terms ?? existing.terms,
+      client_country: b.client_country ?? existing.client_country,
+      service_period_start: b.service_period_start ?? existing.service_period_start,
+      service_period_end: b.service_period_end ?? existing.service_period_end,
     });
     if (Array.isArray(b.items)) replaceLineItems(req.params.id, b.items);
     recalcInvoice(req.params.id);
@@ -132,11 +150,15 @@ router.put('/:id', (req, res) => {
   res.json(loadFull(req.params.id, req.orgId));
 });
 
-// Change status only
+// Change status only — also blocked once locked; automatic paid/partial/
+// overdue transitions still happen via recalcInvoice (payments route).
 router.patch('/:id/status', (req, res) => {
   const existing = db.prepare('SELECT * FROM invoices WHERE id = ? AND org_id = ?').get(req.params.id, req.orgId);
   if (!existing) return res.status(404).json({ error: 'Invoice not found' });
-  const allowed = ['draft', 'sent', 'paid', 'partial', 'overdue', 'void'];
+  if (existing.is_locked) {
+    return res.status(409).json({ error: 'Invoice is issued and immutable. Use Cancel to create a correction (Stornorechnung).' });
+  }
+  const allowed = ['draft', 'void'];
   if (!allowed.includes(req.body.status)) return res.status(400).json({ error: 'Invalid status' });
   db.prepare("UPDATE invoices SET status=?, updated_at=datetime('now') WHERE id=? AND org_id=?").run(
     req.body.status, req.params.id, req.orgId
@@ -145,9 +167,43 @@ router.patch('/:id/status', (req, res) => {
   res.json(loadFull(req.params.id, req.orgId));
 });
 
-router.delete('/:id', (req, res) => {
+// Issue — DRAFT → ISSUED. Assigns the real sequential invoice number,
+// determines the VAT exemption clause, and locks the invoice.
+router.post('/:id/issue', (req, res) => {
   const existing = db.prepare('SELECT id FROM invoices WHERE id = ? AND org_id = ?').get(req.params.id, req.orgId);
   if (!existing) return res.status(404).json({ error: 'Invoice not found' });
+  try {
+    issueInvoice(Number(req.params.id), req.orgId);
+    res.json(loadFull(req.params.id, req.orgId));
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Cancel — creates a Stornorechnung (credit note) linked to this invoice
+// and marks this one `cancelled`. Only possible for already-issued invoices.
+router.post('/:id/cancel', (req, res) => {
+  const existing = db.prepare('SELECT id FROM invoices WHERE id = ? AND org_id = ?').get(req.params.id, req.orgId);
+  if (!existing) return res.status(404).json({ error: 'Invoice not found' });
+  try {
+    const result = cancelInvoice(Number(req.params.id), req.orgId);
+    res.json({
+      original: loadFull(req.params.id, req.orgId),
+      storno: loadFull(result.storno.id, req.orgId),
+    });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Draft invoices only — issued invoices can never be deleted (GoBD), use
+// Cancel instead to keep the sequential numbering intact.
+router.delete('/:id', (req, res) => {
+  const existing = db.prepare('SELECT id, is_locked FROM invoices WHERE id = ? AND org_id = ?').get(req.params.id, req.orgId);
+  if (!existing) return res.status(404).json({ error: 'Invoice not found' });
+  if (existing.is_locked) {
+    return res.status(409).json({ error: 'Cannot delete an issued invoice. Use Cancel to create a Stornorechnung instead.' });
+  }
   db.prepare('DELETE FROM invoices WHERE id = ? AND org_id = ?').run(req.params.id, req.orgId);
   res.json({ ok: true });
 });

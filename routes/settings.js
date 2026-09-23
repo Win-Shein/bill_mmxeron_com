@@ -18,6 +18,8 @@ router.put('/', (req, res) => {
        city=@city, country=@country, tax_number=@tax_number, currency=@currency,
        currency_symbol=@currency_symbol, default_tax=@default_tax, invoice_prefix=@invoice_prefix,
        invoice_next=@invoice_next, language=@language, logo_url=@logo_url, notes=@notes,
+       is_kleinunternehmer=@is_kleinunternehmer, bank_name=@bank_name, bank_iban=@bank_iban,
+       bank_bic=@bank_bic, bank_account_holder=@bank_account_holder,
        updated_at=datetime('now')
      WHERE org_id = @org`
   ).run({
@@ -37,6 +39,11 @@ router.put('/', (req, res) => {
     language: b.language ?? cur.language,
     logo_url: b.logo_url ?? cur.logo_url,
     notes: b.notes ?? cur.notes,
+    is_kleinunternehmer: b.is_kleinunternehmer != null ? (b.is_kleinunternehmer ? 1 : 0) : cur.is_kleinunternehmer,
+    bank_name: b.bank_name ?? cur.bank_name,
+    bank_iban: b.bank_iban ?? cur.bank_iban,
+    bank_bic: b.bank_bic ?? cur.bank_bic,
+    bank_account_holder: b.bank_account_holder ?? cur.bank_account_holder,
   });
   res.json(db.prepare('SELECT * FROM settings WHERE org_id = ?').get(req.orgId));
 });
