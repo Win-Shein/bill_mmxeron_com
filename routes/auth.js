@@ -40,10 +40,13 @@ router.post('/register', (req, res) => {
   });
 
   const userId = create();
-  req.session.userId = userId;
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(user.org_id);
-  res.status(201).json(publicUser(user, org));
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: 'Could not start session' });
+    req.session.userId = userId;
+    res.status(201).json(publicUser(user, org));
+  });
 });
 
 // ---- Login ----
@@ -54,9 +57,12 @@ router.post('/login', (req, res) => {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
   db.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").run(user.id);
-  req.session.userId = user.id;
   const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(user.org_id);
-  res.json(publicUser(user, org));
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: 'Could not start session' });
+    req.session.userId = user.id;
+    res.json(publicUser(user, org));
+  });
 });
 
 // ---- Logout ----

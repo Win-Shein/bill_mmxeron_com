@@ -1135,4 +1135,10 @@ function renderAuth() {
       location.reload();
     } catch (err) { toast(err.message, 'error'); }
   };
+  // Show the uploaded company logo on the login screen (falls back to ₿).
+  get('/branding').then((b) => {
+    const box = $('.auth-logo');
+    if (!box || !b) return;
+    if (b.logo_url) box.innerHTML = `<img src="${b.logo_url}" alt="logo" class="auth-logo-img">`;
+  }).catch(() => {});
 }

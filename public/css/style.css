@@ -253,6 +253,7 @@ textarea { resize: vertical; min-height: 70px; }
   background: var(--accent); color: #fff;
   box-shadow: 6px 6px 14px var(--neu-dark), -6px -6px 14px var(--neu-light);
 }
+.auth-logo-img { max-width: 150px; max-height: 72px; object-fit: contain; display: block; }
 .auth-card h2 { margin: 0 0 6px; text-align: center; font-size: 22px; }
 .auth-card .sub { color: var(--muted); margin-bottom: 26px; font-size: 13px; text-align: center; }
 .auth-card .field label { margin-bottom: 8px; }
@@ -297,3 +298,6 @@ textarea { resize: vertical; min-height: 70px; }
   #topbar-actions .btn { width: 100%; justify-content: center; }
   .totals-box { max-width: 100%; }
 }
+
+/* ---------- Sharp corners (radius 0 across the whole system) ---------- */
+* { border-radius: 0 !important; }
