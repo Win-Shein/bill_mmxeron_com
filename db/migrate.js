@@ -30,6 +30,11 @@ function migrate(raw) {
   addColumn(raw, 'invoices', 'is_locked', 'INTEGER NOT NULL DEFAULT 0');
   addColumn(raw, 'invoices', 'original_invoice_id', 'INTEGER REFERENCES invoices(id)');
 
+  /* ---- invoice_items: category snapshot + expiry/renewal tracking ------ */
+  addColumn(raw, 'invoice_items', 'category', 'TEXT');
+  addColumn(raw, 'invoice_items', 'service_start', 'TEXT');
+  addColumn(raw, 'invoice_items', 'service_end', 'TEXT');
+
   /* ---- settings: Kleinunternehmer flag + bank/payment instructions ----- */
   addColumn(raw, 'settings', 'is_kleinunternehmer', 'INTEGER NOT NULL DEFAULT 0');
   addColumn(raw, 'settings', 'bank_name', 'TEXT');

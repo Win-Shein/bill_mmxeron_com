@@ -9,6 +9,7 @@ Zoho Books လိုမျိုး billing / invoicing system တစ်ခု�
 - **Items / Products & Services** — CRUD, category (VPS/VPN/Domain/Hosting/App/License/Web Building/Web·Server·App Maintenance), billing cycle, price, tax rate, optional stock tracking, category filter
 - **Invoices** — Excel-style grid with row numbers, **daily view by default** + date-range filter (Today / This Month / All), Edit · Print (PDF) · Delete actions, running totals, one-click **Export to Excel (CSV)**; line items, auto numbering, discount + tax, statuses (draft / sent / partial / paid / overdue / void), PDF export
 - **Payments** — record partial/full payments; invoice status auto-updates
+- **Renewals / သက်တမ်းကုန်ဆုံးမှု** — per-line service term (`start` / expiry) for subscription items such as VPS, Domain, Hosting and License; the expiry auto-fills from the item's billing cycle (monthly / quarterly / yearly) but can be overridden by hand. A dedicated **Renewals** page lists each active subscription's next expiry with days-left, expired / expiring-soon / active badges, category filters and CSV export; a sidebar badge and a dashboard card surface items expiring within 30 days. Drafts, cancelled invoices and Stornorechnungen are ignored so only genuinely billed services are tracked.
 - **Reports** — date-filtered receivables aging, **monthly summary (လစဉ်ချုပ်)** with billed/collected/outstanding, top-selling items, outstanding-invoices grid with row numbers + CSV export
 - **Settings** — **company logo upload (PNG/JPG/SVG)** shown on the **login screen**, sidebar & on invoice PDFs, company profile, currency (€ default), default tax, invoice prefix & numbering, **account email & password change**, **language (English / မြန်မာ)**, light/dark theme
 - **UI / UX** — fully **responsive** (off-canvas sidebar drawer on mobile), **live date & time** in the top bar on every page, **light / dark theme** toggle, **bilingual (English / Myanmar)** interface, serial-numbered grids and Export-to-Excel across Customers, Items, Payments, Invoices & Reports, payment method filter
@@ -122,5 +123,6 @@ The SQLite file is created automatically at `data/billing.db` on first run.
 | PATCH | `/api/invoices/:id/status` | change status |
 | GET | `/api/invoices/:id/pdf` | download PDF |
 | GET/POST | `/api/payments` | list / record payments |
+| GET | `/api/renewals` | active subscription expiries (VPS / Domain / …) |
 | GET | `/api/reports/aging` · `/by-item` · `/revenue` | reports |
 | GET/PUT | `/api/settings` | company settings |

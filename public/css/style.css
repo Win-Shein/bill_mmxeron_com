@@ -79,8 +79,10 @@ body {
   color: var(--sidebar-text); text-decoration: none; font-weight: 500;
   transition: background .15s, color .15s;
 }
+.nav-link { display: flex; align-items: center; gap: 10px; }
 .nav-link:hover { background: rgba(255,255,255,.06); color: #fff; }
 .nav-link.active { background: var(--accent); color: #fff; }
+.nav-badge { margin-left: auto; background: var(--red); color: #fff; border-radius: 999px; font-size: 11px; font-weight: 700; padding: 1px 7px; line-height: 1.5; }
 .sidebar-foot { margin-top: auto; padding: 16px 22px; font-size: 11px; opacity: .5; }
 
 /* ---------- Content ---------- */
@@ -168,7 +170,9 @@ textarea { resize: vertical; min-height: 70px; }
 .badge.overdue { background: #fee2e2; color: #b91c1c; }
 .badge.void      { background: #e5e7eb; color: #6b7280; text-decoration: line-through; }
 .badge.cancelled { background: #fee2e2; color: #991b1b; text-decoration: line-through; }
-.vat-note { background: #fef9c3; color: #78350f; border-radius: 8px; padding: 10px 12px; font-size: 12.5px; margin-top: 12px; }
+.badge.expired   { background: #fee2e2; color: #b91c1c; }
+.badge.soon      { background: #fef3c7; color: #b45309; }
+.badge.ok        { background: #dcfce7; color: #15803d; }
 .lock-note { color: #6b7280; font-size: 12px; margin-top: 4px; }
 
 /* ---------- Modal ---------- */

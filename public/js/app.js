@@ -45,6 +45,28 @@ const fmt = (n) => (Number(n) || 0).toLocaleString('en-US', { minimumFractionDig
 const money = (n) => `${SETTINGS.currency_symbol} ${fmt(n)}`;
 const today = () => new Date().toISOString().slice(0, 10);
 
+// Add a billing cycle to a date for subscription expiry (months, clamped to
+// the last valid day so 31 Jan + 1 month = 28/29 Feb, never 2/3 Mar).
+function addCycle(dateStr, cycle) {
+  const months = { monthly: 1, quarterly: 3, yearly: 12 }[cycle];
+  if (!dateStr || !months) return '';
+  const d = new Date(dateStr + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return '';
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, lastDay));
+  return d.toISOString().slice(0, 10);
+}
+
+// -1 = expired, 0-30 = expiring soon, >30 = active
+function renewalState(daysLeft) {
+  if (daysLeft == null) return 'ok';
+  if (daysLeft < 0) return 'expired';
+  return daysLeft <= 30 ? 'soon' : 'ok';
+}
+
 function toast(msg, type = '') {
   const t = el(`<div class="toast ${type}">${esc(msg)}</div>`);
   $('#toast-root').appendChild(t);
@@ -102,6 +124,12 @@ const MM = {
   'Receivables Aging': 'ကြွေးကျန် သက်တမ်း', 'Top Selling Items': 'ရောင်းအားကောင်း ပစ္စည်း',
   'Monthly Summary (လစဉ်ချုပ်)': 'လစဉ်ချုပ်', 'Overdue / Outstanding Invoices': 'ကျော်လွန် / ကျန်ရှိ လွှာများ',
   Current: 'လက်ရှိ', Month: 'လ', Billed: 'တောင်းခံ', Qty: 'အရေအတွက်', Revenue: 'ဝင်ငွေ', Item: 'ပစ္စည်း',
+  // Renewals / expiry tracking
+  Renewals: 'သက်တမ်းကုန်ဆုံးမှု', Expires: 'သက်တမ်းကုန်ရက်', Expired: 'သက်တမ်းကုန်ပြီး',
+  'Expiring Soon': 'မကြာမီ ကုန်မည်', 'Days Left': 'ကျန်ရက်', 'Upcoming Renewals': 'သက်တမ်းကုန်မည့် စာရင်း',
+  'No renewals': 'သက်တမ်းကုန်မည့် အချက်အလက် မရှိပါ', 'All categories': 'အမျိုးအစား အားလုံး',
+  'Service Start': 'စတင်ရက်', 'Expiry Date': 'သက်တမ်းကုန်ရက်',
+  'VPS / Domain expiry tracking': 'VPS / Domain သက်တမ်း စောင့်ကြည့်မှု',
   // Payments / filters
   'Search…': 'ရှာဖွေရန်…', 'All methods': 'နည်းလမ်းအားလုံး', paypal: 'PayPal', debitcard: 'Debit Card', bank: 'ဘဏ်',
   'No payments yet': 'ငွေပေးချေမှု မရှိသေးပါ',
@@ -131,7 +159,7 @@ const MM = {
   'Start your free account': 'အခမဲ့ အကောင့် စတင်ပါ', Plan: 'အစီအစဉ်', 'Current Plan': 'လက်ရှိ Plan',
   'Upgrade to Pro': 'Pro သို့ တိုးမြှင့်', 'invoices this month': 'ဤလ ငွေတောင်းခံလွှာ', Unlimited: 'အကန့်အသတ်မဲ့',
   'Team Members': 'အဖွဲ့ဝင်များ', '+ Add User': '+ အသုံးပြုသူ ထည့်', Role: 'အခန်းကဏ္ဍ',
-  Owner: 'ပိုင်ရှင်', Staff: 'ဝန်ထမ်း', Viewer: 'ကြည့်ရှုသူ', Active: 'အသုံးပြုနေ', Deactivate: 'ပိတ်ရန်',
+  Owner: 'ပိုင်ရှင်', Staff: 'ဝန်ထမ်း', Viewer: 'ကြည့်ရှုသူ', Active: 'သက်တမ်းရှိ', Deactivate: 'ပိတ်ရန်',
   Activate: 'ဖွင့်ရန်', 'Reset Password': 'စကားဝှက် ပြောင်း', Pending: 'စောင့်ဆိုင်း', Approved: 'အတည်ပြုပြီး',
   Rejected: 'ငြင်းပယ်', Approve: 'အတည်ပြု', Reject: 'ငြင်းပယ်', Organizations: 'အဖွဲ့အစည်းများ',
   'Upgrade Requests': 'တိုးမြှင့်ရန် တောင်းဆိုမှုများ', 'Submit Upgrade Request': 'တောင်းဆိုမှု တင်မည်',
@@ -233,12 +261,17 @@ route('dashboard', async () => {
       <div class="bar-label">${m.month.slice(5)}/${m.month.slice(2, 4)}</div>
     </div>`).join('') || '<div class="empty">No payment data yet</div>';
 
+  const renewals = d.renewals || [];
+  const expiringSoon = renewals.filter((r) => r.days_left <= 30).length;
+  const upcoming = renewals.filter((r) => r.days_left <= 60).slice(0, 6);
+
   $('#view').innerHTML = `
     <div class="stat-grid">
       <div class="card stat-card accent"><div class="label">${t('Total Billed')}</div><div class="value">${money(tot.total_billed)}</div><div class="sub">${tot.invoice_count} ${t('invoices')}</div></div>
       <div class="card stat-card green"><div class="label">${t('Collected')}</div><div class="value">${money(tot.total_collected)}</div></div>
       <div class="card stat-card amber"><div class="label">${t('Outstanding')}</div><div class="value">${money(tot.outstanding)}</div></div>
       <div class="card stat-card red"><div class="label">${t('Overdue')}</div><div class="value">${money(d.overdue.amount)}</div><div class="sub">${d.overdue.n} ${t('invoices')}</div></div>
+      <div class="card stat-card ${expiringSoon ? 'red' : 'green'}"><div class="label">${t('Expiring Soon')}</div><div class="value">${expiringSoon}</div><div class="sub">${t('Renewals')}</div></div>
     </div>
     <div class="grid-2">
       <div class="card">
@@ -251,6 +284,24 @@ route('dashboard', async () => {
           ${d.topCustomers.map((c) => `<tr><td>${esc(c.name)}</td><td class="num mono">${money(c.billed)}</td></tr>`).join('') || `<tr><td class="muted">${t('No data')}</td></tr>`}
         </tbody></table>
       </div>
+    </div>
+    <div class="card" style="margin-top:18px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 class="card-title" style="margin:0">${t('Upcoming Renewals')}</h3>
+        <a class="link" data-goto-renewals>${t('Renewals')} →</a>
+      </div>
+      <table>
+        <thead><tr><th>${t('Customer')}</th><th>${t('Item')}</th><th>${t('Expires')}</th><th class="num">${t('Days Left')}</th><th>${t('Status')}</th></tr></thead>
+        <tbody>
+          ${upcoming.map((r) => `<tr>
+            <td>${esc(r.customer_name)}</td>
+            <td>${esc(r.description)}</td>
+            <td>${esc(r.expires_at)}</td>
+            <td class="num mono">${r.days_left}</td>
+            <td>${renewalBadge(r.days_left)}</td>
+          </tr>`).join('') || `<tr><td colspan="5" class="muted">${t('No renewals')}</td></tr>`}
+        </tbody>
+      </table>
     </div>
     <div class="card" style="margin-top:18px">
       <h3 class="card-title">${t('Recent Invoices')}</h3>
@@ -270,6 +321,9 @@ route('dashboard', async () => {
     </div>`;
 
   $$('[data-inv]').forEach((a) => a.onclick = () => viewInvoice(a.dataset.inv));
+  const gotoRenewals = $('[data-goto-renewals]');
+  if (gotoRenewals) gotoRenewals.onclick = () => navigate('renewals');
+  refreshRenewalBadge();
 });
 
 /* ============================================================
@@ -581,17 +635,14 @@ async function editInvoice(id) {
         <div class="field"><label>${t('Issue Date')}</label><input id="in-issue" type="date" value="${esc(inv ? inv.issue_date : today())}"></div>
         <div class="field"><label>${t('Due Date')}</label><input id="in-due" type="date" value="${esc(inv ? inv.due_date || '' : '')}"></div>
       </div>
-      <div class="form-row-3">
-        <div class="field"><label>${t('Client Country')}</label><input id="in-country" value="${esc(inv ? inv.client_country || '' : 'Myanmar')}" placeholder="Myanmar"></div>
-        <div class="field"><label>${t('Service Period Start')}</label><input id="in-svc-start" type="date" value="${esc(inv ? inv.service_period_start || '' : '')}"></div>
-        <div class="field"><label>${t('Service Period End')}</label><input id="in-svc-end" type="date" value="${esc(inv ? inv.service_period_end || '' : '')}"></div>
-      </div>
-      <div class="muted" style="font-size:12px;margin:-8px 0 4px">${t('Non-EU clients (e.g. Myanmar) are automatically VAT-exempt (§ 3a Abs. 2 UStG) when this invoice is issued. Service period is required before issuing.')}</div>
 
-      <table class="line-table">
-        <thead><tr><th class="col-desc">${t('Item / Description')}</th><th>${t('Qty')}</th><th>${t('Price')}</th><th>${t('Tax %')}</th><th class="num">${t('Amount')}</th><th></th></tr></thead>
-        <tbody id="line-rows"></tbody>
-      </table>
+      <h3 class="card-title" style="margin:4px 0 8px">${t('Items')}</h3>
+      <div style="overflow-x:auto">
+        <table class="line-table" style="min-width:700px">
+          <thead><tr><th class="col-desc">${t('Item / Description')}</th><th>${t('Qty')}</th><th>${t('Price')}</th><th>${t('Service Start')}</th><th>${t('Expiry Date')}</th><th class="num">${t('Amount')}</th><th></th></tr></thead>
+          <tbody id="line-rows"></tbody>
+        </table>
+      </div>
       <button class="btn btn-sm" id="add-line" style="margin-top:8px">${t('+ Add line')}</button>
 
       <div class="form-row" style="margin-top:18px">
@@ -602,7 +653,6 @@ async function editInvoice(id) {
         <div class="totals-box">
           <div class="row"><span>${t('Subtotal')}</span><span class="mono" id="t-sub">—</span></div>
           <div class="row"><span>${t('Discount')}</span><input id="in-discount" type="number" step="0.01" style="max-width:120px;text-align:right" value="${inv ? inv.discount : 0}"></div>
-          <div class="row"><span>${t('Tax')}</span><span class="mono" id="t-tax">—</span></div>
           <div class="row grand"><span>${t('Total')}</span><span class="mono" id="t-total">—</span></div>
         </div>
       </div>`,
@@ -623,33 +673,44 @@ async function editInvoice(id) {
         </td>
         <td><input class="l-qty" type="number" step="0.01" style="width:70px" value="${line.quantity ?? 1}"></td>
         <td><input class="l-price" type="number" step="0.01" style="width:90px" value="${line.unit_price ?? 0}"></td>
-        <td><input class="l-tax" type="number" step="0.01" style="width:60px" value="${line.tax_rate ?? 0}"></td>
+        <td><input class="l-start" type="date" style="width:130px" value="${esc(line.service_start || '')}"></td>
+        <td><input class="l-end" type="date" style="width:130px" value="${esc(line.service_end || '')}"></td>
         <td class="num mono l-amount">0.00</td>
         <td><button class="line-remove">&times;</button></td>
       </tr>`);
     if (line.item_id) $('.l-item', tr).value = line.item_id;
+    // Fill the per-line service term from the item's billing cycle; the base
+    // date is the line start, else the invoice issue date.
+    const autoFillTerm = (it) => {
+      if (!it || !it.billing_cycle || it.billing_cycle === 'one-time') return;
+      const base = $('.l-start', tr).value || $('#in-issue').value;
+      if (!base) return;
+      $('.l-start', tr).value = base;
+      $('.l-end', tr).value = addCycle(base, it.billing_cycle);
+    };
     $('.l-item', tr).onchange = (e) => {
       const it = itemsById[e.target.value];
-      if (it) { $('.l-desc', tr).value = it.name; $('.l-price', tr).value = it.price; $('.l-tax', tr).value = it.tax_rate; }
+      if (it) { $('.l-desc', tr).value = it.name; $('.l-price', tr).value = it.price; }
+      autoFillTerm(it);
       recalc();
     };
-    $$('.l-qty,.l-price,.l-tax', tr).forEach((i) => i.oninput = recalc);
+    $('.l-start', tr).onchange = () => autoFillTerm(itemsById[$('.l-item', tr).value]);
+    $$('.l-qty,.l-price', tr).forEach((i) => i.oninput = recalc);
     $('.line-remove', tr).onclick = () => { tr.remove(); recalc(); };
     rowsBody.appendChild(tr);
   }
 
   function recalc() {
-    let sub = 0, tax = 0;
+    let sub = 0;
     $$('#line-rows tr').forEach((tr) => {
-      const q = +$('.l-qty', tr).value || 0, p = +$('.l-price', tr).value || 0, t = +$('.l-tax', tr).value || 0;
+      const q = +$('.l-qty', tr).value || 0, p = +$('.l-price', tr).value || 0;
       const amt = q * p;
       $('.l-amount', tr).textContent = fmt(amt);
-      sub += amt; tax += amt * (t / 100);
+      sub += amt;
     });
     const disc = +$('#in-discount').value || 0;
     $('#t-sub').textContent = money(sub);
-    $('#t-tax').textContent = money(tax);
-    $('#t-total').textContent = money(Math.max(0, sub - disc + tax));
+    $('#t-total').textContent = money(Math.max(0, sub - disc));
   }
 
   if (lines.length) lines.forEach(addRow); else addRow();
@@ -661,27 +722,32 @@ async function editInvoice(id) {
   $('#in-save').onclick = async () => {
     const customer_id = $('#in-customer').value;
     if (!customer_id) return toast(t('Please select a customer'), 'error');
-    const lineItems = $$('#line-rows tr').map((tr) => ({
-      item_id: $('.l-item', tr).value || null,
-      description: $('.l-desc', tr).value,
-      quantity: $('.l-qty', tr).value,
-      unit_price: $('.l-price', tr).value,
-      tax_rate: $('.l-tax', tr).value,
-    })).filter((l) => l.description.trim());
+    const lineItems = $$('#line-rows tr').map((tr) => {
+      const itemId = $('.l-item', tr).value || null;
+      const item = itemId ? itemsById[itemId] : null;
+      return {
+        item_id: itemId,
+        description: $('.l-desc', tr).value,
+        category: item ? item.category : null,
+        quantity: $('.l-qty', tr).value,
+        unit_price: $('.l-price', tr).value,
+        tax_rate: 0,
+        service_start: $('.l-start', tr).value || null,
+        service_end: $('.l-end', tr).value || null,
+      };
+    }).filter((l) => l.description.trim());
     if (!lineItems.length) return toast(t('Add at least one line item'), 'error');
 
     const payload = {
       customer_id, issue_date: $('#in-issue').value, due_date: $('#in-due').value || null,
       discount: $('#in-discount').value, notes: $('#in-notes').value, terms: $('#in-terms').value,
-      client_country: $('#in-country').value || 'Myanmar',
-      service_period_start: $('#in-svc-start').value || null,
-      service_period_end: $('#in-svc-end').value || null,
       items: lineItems,
     };
     try {
       const saved = await (id ? put('/invoices/' + id, payload) : post('/invoices', payload));
       toast('Invoice saved', 'success'); closeModal();
       await navigate('invoices'); viewInvoice(saved.id);
+      refreshRenewalBadge();
     } catch (e) {
       toast(e.message, 'error');
     }
@@ -695,6 +761,7 @@ async function viewInvoice(id) {
   const isDraft = !inv.is_locked;
   const isCancelled = inv.status === 'cancelled';
   const isStorno = !!inv.original_invoice_id;
+  const hasExpiry = (inv.items || []).some((it) => it.service_end);
   const statusButtons = canWrite() && isDraft ? ['void'].filter((s) => s !== inv.status)
     .map((s) => `<button class="btn btn-sm" data-status="${s}">${statusLabel(s)}</button>`).join('') : '';
 
@@ -708,33 +775,29 @@ async function viewInvoice(id) {
           <strong>${esc(c.name)}</strong>
           <div class="muted">${esc(c.company || '')}</div>
           <div class="muted">${esc(c.email || '')}</div>
-          <div class="muted">${esc(inv.client_country || '')}</div>
         </div>
         <div class="right">
           <div>${badge(inv.status)} ${isDraft ? '' : '<span title="Issued & immutable">🔒</span>'}</div>
           <div class="muted" style="margin-top:6px">${t('Issue')}: ${esc(inv.issue_date)}</div>
           <div class="muted">${t('Due')}: ${esc(inv.due_date || '—')}</div>
-          ${(inv.service_period_start || inv.service_period_end) ? `<div class="muted">${t('Service Period')}: ${esc(inv.service_period_start || '—')} – ${esc(inv.service_period_end || '—')}</div>` : ''}
           ${isStorno && inv.original_invoice_no ? `<div class="muted">Cancels: ${esc(inv.original_invoice_no)}</div>` : ''}
         </div>
       </div>
       <div class="table-wrap" style="box-shadow:none">
         <table>
-          <thead><tr><th>${t('Description')}</th><th class="num">${t('Qty')}</th><th class="num">${t('Price')}</th><th class="num">${t('Tax')}</th><th class="num">${t('Amount')}</th></tr></thead>
+          <thead><tr><th>${t('Description')}</th><th class="num">${t('Qty')}</th><th class="num">${t('Price')}</th><th class="num">${t('Tax')}</th>${hasExpiry ? `<th>${t('Service Start')}</th><th>${t('Expiry Date')}</th>` : ''}<th class="num">${t('Amount')}</th></tr></thead>
           <tbody>
-            ${inv.items.map((it) => `<tr><td>${esc(it.description)}</td><td class="num">${it.quantity}</td><td class="num mono">${money(it.unit_price)}</td><td class="num">${it.tax_rate}%</td><td class="num mono">${money(it.line_total)}</td></tr>`).join('')}
+            ${inv.items.map((it) => `<tr><td>${esc(it.description)}</td><td class="num">${it.quantity}</td><td class="num mono">${money(it.unit_price)}</td><td class="num">${it.tax_rate}%</td>${hasExpiry ? `<td>${esc(it.service_start || '—')}</td><td>${esc(it.service_end || '—')}</td>` : ''}<td class="num mono">${money(it.line_total)}</td></tr>`).join('')}
           </tbody>
         </table>
       </div>
       <div class="totals-box" style="margin-top:14px">
         <div class="row"><span>${t('Subtotal')}</span><span class="mono">${money(inv.subtotal)}</span></div>
         ${inv.discount ? `<div class="row"><span>${t('Discount')}</span><span class="mono">- ${money(inv.discount)}</span></div>` : ''}
-        <div class="row"><span>${t('Tax')} (${inv.vat_rate ?? 0}%)</span><span class="mono">${money(inv.tax_total)}</span></div>
         <div class="row grand"><span>${t('Total')}</span><span class="mono">${money(inv.total)}</span></div>
         <div class="row"><span>${t('Paid')}</span><span class="mono">${money(inv.amount_paid)}</span></div>
         <div class="row" style="font-weight:700"><span>${t('Balance Due')}</span><span class="mono">${money(balance)}</span></div>
       </div>
-      ${inv.vat_exemption_reason ? `<div class="vat-note">${esc(inv.vat_exemption_reason)}</div>` : ''}
       ${isDraft ? `<div class="lock-note">${t('Draft — editable. Issue to lock and assign the official sequential invoice number.')}</div>` : ''}
       ${inv.payments.length ? `
         <h3 class="card-title" style="margin-top:20px">${t('Payments')}</h3>
@@ -862,6 +925,83 @@ function recordPayment(inv) {
     } catch (e) { toast(e.message, 'error'); }
   };
 }
+
+/* ============================================================
+   Renewals — VPS / Domain / subscription expiry tracking
+   ============================================================ */
+let renewalCategory = '';
+let renewalStateFilter = '';
+
+function renewalBadge(daysLeft) {
+  const st = renewalState(daysLeft);
+  const label = st === 'expired' ? t('Expired') : st === 'soon' ? t('Expiring Soon') : t('Active');
+  return `<span class="badge ${st}">${label}</span>`;
+}
+
+/** Show a count of renewals expiring within 30 days on the sidebar link. */
+async function refreshRenewalBadge() {
+  const b = $('#renewals-badge');
+  if (!b) return;
+  try {
+    const all = await get('/renewals');
+    const n = all.filter((r) => r.days_left <= 30).length;
+    b.textContent = n;
+    b.hidden = n <= 0;
+  } catch (_) { b.hidden = true; }
+}
+
+route('renewals', async () => {
+  $('#topbar-actions').innerHTML = '';
+  const all = await get('/renewals');
+  const categories = [...new Set(all.map((r) => r.category || 'Other'))].sort();
+  const rows = all.filter((r) =>
+    (!renewalCategory || (r.category || 'Other') === renewalCategory) &&
+    (!renewalStateFilter || renewalState(r.days_left) === renewalStateFilter));
+
+  const counts = { expired: 0, soon: 0, ok: 0 };
+  all.forEach((r) => { counts[renewalState(r.days_left)]++; });
+
+  $('#view').innerHTML = `
+    <div class="stat-grid">
+      <div class="card stat-card red"><div class="label">${t('Expired')}</div><div class="value">${counts.expired}</div></div>
+      <div class="card stat-card amber"><div class="label">${t('Expiring Soon')} (≤30)</div><div class="value">${counts.soon}</div></div>
+      <div class="card stat-card green"><div class="label">${t('Active')}</div><div class="value">${counts.ok}</div></div>
+    </div>
+    <div class="toolbar">
+      <select id="rn-cat" style="max-width:220px">
+        <option value="">${t('All categories')}</option>
+        ${categories.map((c) => `<option value="${esc(c)}" ${renewalCategory === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+      </select>
+      ${[['', t('All')], ['expired', t('Expired')], ['soon', t('Expiring Soon')], ['ok', t('Active')]].map(([v, lbl]) => `<button class="btn btn-sm ${renewalStateFilter === v ? 'btn-primary' : ''}" data-rstate="${v}">${lbl}</button>`).join('')}
+      <span class="spacer"></span>
+      <button class="btn btn-sm" id="rn-export">${t('⬇ Export Excel')}</button>
+    </div>
+    <div class="muted" style="font-size:12px;margin:-6px 0 10px">${t('VPS / Domain expiry tracking')}</div>
+    <div class="table-wrap">
+      <table class="grid-table">
+        <thead><tr><th class="num" style="width:44px">${t('#')}</th><th>${t('Customer')}</th><th>${t('Item')}</th><th>${t('Category')}</th><th>${t('Expires')}</th><th class="num">${t('Days Left')}</th><th>${t('Status')}</th></tr></thead>
+        <tbody>
+          ${rows.map((r, idx) => `
+            <tr>
+              <td class="num muted">${idx + 1}</td>
+              <td>${esc(r.customer_name)}</td>
+              <td>${esc(r.description)}</td>
+              <td>${esc(r.category || 'Other')}</td>
+              <td>${esc(r.expires_at)}</td>
+              <td class="num mono">${r.days_left}</td>
+              <td>${renewalBadge(r.days_left)}</td>
+            </tr>`).join('') || `<tr><td colspan="7" class="empty">${t('No renewals')}</td></tr>`}
+        </tbody>
+      </table>
+    </div>`;
+
+  $('#rn-cat').onchange = (e) => { renewalCategory = e.target.value; navigate('renewals'); };
+  $$('[data-rstate]').forEach((b) => b.onclick = () => { renewalStateFilter = b.dataset.rstate; navigate('renewals'); });
+  $('#rn-export').onclick = () => exportCSV('renewals.csv',
+    ['#', 'Customer', 'Item', 'Category', 'Expires', 'Days Left', 'Status'],
+    rows.map((r, idx) => [idx + 1, r.customer_name, r.description, r.category || '', r.expires_at, r.days_left,
+      renewalState(r.days_left) === 'expired' ? 'Expired' : renewalState(r.days_left) === 'soon' ? 'Expiring soon' : 'Active']));
+});
 
 /* ============================================================
    Payments (global list)
@@ -1225,6 +1365,7 @@ function applyChrome() {
   applyBranding();
   applyStaticI18n();
   applyChrome();
+  refreshRenewalBadge();
 
   const start = (location.hash || '#dashboard').slice(1);
   navigate(routes[start] ? start : 'dashboard');

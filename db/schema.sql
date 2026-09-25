@@ -140,10 +140,14 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   invoice_id    INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
   item_id       INTEGER REFERENCES items(id),
   description   TEXT    NOT NULL,
+  category      TEXT,                          -- snapshot of the item category (VPS, Domain, ...)
   quantity      REAL    NOT NULL DEFAULT 1,
   unit_price    REAL    NOT NULL DEFAULT 0,
   tax_rate      REAL    NOT NULL DEFAULT 0,
   line_total    REAL    NOT NULL DEFAULT 0,
+  -- Expiry / renewal tracking for subscriptions (VPS, Domain, Hosting, License...)
+  service_start TEXT,                          -- start of the service term for this line
+  service_end   TEXT,                          -- expiry / next-renewal date for this line
   sort_order    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);

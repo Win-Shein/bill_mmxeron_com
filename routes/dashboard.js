@@ -2,6 +2,7 @@
 
 const express = require('express');
 const db = require('../db/database');
+const { listRenewals } = require('../lib/renewals');
 
 const router = express.Router();
 
@@ -65,7 +66,9 @@ router.get('/', (req, res) => {
     )
     .all(org);
 
-  res.json({ totals, overdue, byStatus, counts, monthly, recentInvoices, topCustomers });
+  const renewals = listRenewals(org);
+
+  res.json({ totals, overdue, byStatus, counts, monthly, recentInvoices, topCustomers, renewals });
 });
 
 module.exports = router;

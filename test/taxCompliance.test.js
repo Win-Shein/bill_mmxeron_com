@@ -39,7 +39,7 @@ function seedCustomer(orgId, country = 'Myanmar') {
     .run(orgId, country).lastInsertRowid;
 }
 
-function createDraft(orgId, customerId, { servicePeriod = true, lineTax = 19, qty = 1, price = 100 } = {}) {
+function createDraft(orgId, customerId, { servicePeriod = true, lineTax = 19, qty = 1, price = 100, lineService = null } = {}) {
   const id = db.prepare(
     `INSERT INTO invoices (org_id, invoice_no, customer_id, issue_date, status, currency,
                            client_country, service_period_start, service_period_end)
@@ -48,7 +48,11 @@ function createDraft(orgId, customerId, { servicePeriod = true, lineTax = 19, qt
     orgId, draftInvoiceNo(), customerId,
     servicePeriod ? '2026-09-01' : null, servicePeriod ? '2026-09-30' : null
   ).lastInsertRowid;
-  replaceLineItems(id, [{ description: 'Consulting', quantity: qty, unit_price: price, tax_rate: lineTax }]);
+  replaceLineItems(id, [{
+    description: 'Consulting', quantity: qty, unit_price: price, tax_rate: lineTax,
+    service_start: lineService ? lineService.start : null,
+    service_end: lineService ? lineService.end : null,
+  }]);
   recalcInvoice(id);
   return id;
 }
@@ -111,11 +115,25 @@ test('invoice lifecycle: VAT exemption zeroes line-item tax on issue', () => {
   assert.strictEqual(round2(inv.total), 100);
 });
 
-test('invoice lifecycle: issue requires a service period (Leistungszeitraum)', () => {
+test('invoice lifecycle: issue derives the service period from line items', () => {
+  const orgId = seedOrg();
+  const custId = seedCustomer(orgId);
+  const id = createDraft(orgId, custId, {
+    servicePeriod: false, lineService: { start: '2026-09-01', end: '2026-09-30' },
+  });
+  const issued = issueInvoice(id, orgId);
+  assert.strictEqual(issued.service_period_start, '2026-09-01');
+  assert.strictEqual(issued.service_period_end, '2026-09-30');
+});
+
+test('invoice lifecycle: issue succeeds without any service dates', () => {
   const orgId = seedOrg();
   const custId = seedCustomer(orgId);
   const id = createDraft(orgId, custId, { servicePeriod: false });
-  assert.throws(() => issueInvoice(id, orgId), (e) => e.status === 400 && /service period/i.test(e.message));
+  const issued = issueInvoice(id, orgId);
+  assert.strictEqual(issued.is_locked, 1);
+  assert.strictEqual(issued.service_period_start, null);
+  assert.strictEqual(issued.service_period_end, null);
 });
 
 test('invoice lifecycle: an issued invoice cannot be issued again', () => {
