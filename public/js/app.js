@@ -131,7 +131,8 @@ const MM = {
   'Service Start': 'စတင်ရက်', 'Expiry Date': 'သက်တမ်းကုန်ရက်',
   'VPS / Domain expiry tracking': 'VPS / Domain သက်တမ်း စောင့်ကြည့်မှု',
   // Payments / filters
-  'Search…': 'ရှာဖွေရန်…', 'All methods': 'နည်းလမ်းအားလုံး', paypal: 'PayPal', debitcard: 'Debit Card', bank: 'ဘဏ်',
+  'Search…': 'ရှာဖွေရန်…', 'All methods': 'နည်းလမ်းအားလုံး', paypal: 'PayPal', bank: 'ဘဏ်',
+  kpay: 'KPay', wavepay: 'Wave Pay', wise: 'Wise',
   'No payments yet': 'ငွေပေးချေမှု မရှိသေးပါ',
   // Settings
   'Company Logo': 'ကုမ္ပဏီ Logo', 'Company Details': 'ကုမ္ပဏီ အချက်အလက်', 'Billing Preferences': 'ငွေတောင်းခံမှု ဆက်တင်',
@@ -345,7 +346,7 @@ async function renderCustomers(search = '') {
     </div>
     <div class="table-wrap">
       <table class="grid-table">
-        <thead><tr><th class="num" style="width:44px">${t('#')}</th><th>${t('Name')}</th><th>${t('Contact')}</th><th class="num">${t('Invoices')}</th><th class="num">${t('Billed')}</th><th class="num">${t('Outstanding')}</th><th style="width:120px">${t('Actions')}</th></tr></thead>
+        <thead><tr><th class="num" style="width:44px">${t('#')}</th><th>${t('Name')}</th><th>${t('Contact')}</th><th class="num">${t('Invoices')}</th><th class="num">${t('Outstanding')}</th><th style="width:120px">${t('Actions')}</th></tr></thead>
         <tbody>
           ${rows.map((c, idx) => `
             <tr>
@@ -353,19 +354,18 @@ async function renderCustomers(search = '') {
               <td><strong>${esc(c.name)}</strong>${c.company ? `<div class="muted">${esc(c.company)}</div>` : ''}</td>
               <td>${esc(c.email || '')}${c.phone ? `<div class="muted">${esc(c.phone)}</div>` : ''}</td>
               <td class="num">${c.invoice_count}</td>
-              <td class="num mono">${money(c.total_billed)}</td>
               <td class="num mono">${money(c.outstanding)}</td>
               <td class="num" style="white-space:nowrap">
                 ${canWrite() ? `<button class="btn btn-sm" data-edit="${c.id}">✏️</button>
                 <button class="btn btn-sm btn-danger" data-del="${c.id}">🗑️</button>` : '<span class="muted">—</span>'}
               </td>
-            </tr>`).join('') || `<tr><td colspan="7" class="empty">${t('No data')}</td></tr>`}
+            </tr>`).join('') || `<tr><td colspan="6" class="empty">${t('No data')}</td></tr>`}
         </tbody>
       </table>
     </div>`;
   $('#cust-export').onclick = () => exportCSV('customers.csv',
-    ['#', 'Name', 'Company', 'Email', 'Phone', 'Invoices', 'Billed', 'Outstanding'],
-    rows.map((c, idx) => [idx + 1, c.name, c.company || '', c.email || '', c.phone || '', c.invoice_count, c.total_billed, c.outstanding]));
+    ['#', 'Name', 'Company', 'Email', 'Phone', 'Invoices', 'Outstanding'],
+    rows.map((c, idx) => [idx + 1, c.name, c.company || '', c.email || '', c.phone || '', c.invoice_count, c.outstanding]));
 
   let timer;
   $('#cust-search').oninput = (e) => { clearTimeout(timer); timer = setTimeout(() => renderCustomers(e.target.value), 250); };
@@ -441,7 +441,7 @@ async function renderItems(search = '') {
     </div>
     <div class="table-wrap">
       <table class="grid-table">
-        <thead><tr><th class="num" style="width:44px">${t('#')}</th><th>${t('Name')}</th><th>${t('Category')}</th><th>${t('SKU')}</th><th class="num">${t('Price')}</th><th class="num">${t('Tax %')}</th><th class="num">${t('Stock')}</th><th style="width:120px">${t('Actions')}</th></tr></thead>
+        <thead><tr><th class="num" style="width:44px">${t('#')}</th><th>${t('Name')}</th><th>${t('Category')}</th><th>${t('SKU')}</th><th class="num">${t('Price')}</th><th class="num">${t('Stock')}</th><th style="width:120px">${t('Actions')}</th></tr></thead>
         <tbody>
           ${rows.map((i, idx) => `
             <tr>
@@ -450,19 +450,18 @@ async function renderItems(search = '') {
               <td>${esc(i.category || 'Other')}</td>
               <td>${esc(i.sku || '')}</td>
               <td class="num mono">${money(i.price)}</td>
-              <td class="num">${i.tax_rate}%</td>
               <td class="num">${i.stock == null ? '<span class="muted">—</span>' : i.stock}</td>
               <td class="num" style="white-space:nowrap">
                 ${canWrite() ? `<button class="btn btn-sm" data-edit="${i.id}">✏️</button>
                 <button class="btn btn-sm btn-danger" data-del="${i.id}">🗑️</button>` : '<span class="muted">—</span>'}
               </td>
-            </tr>`).join('') || `<tr><td colspan="8" class="empty">${t('No data')}</td></tr>`}
+            </tr>`).join('') || `<tr><td colspan="7" class="empty">${t('No data')}</td></tr>`}
         </tbody>
       </table>
     </div>`;
   $('#item-export').onclick = () => exportCSV('items.csv',
-    ['#', 'Name', 'Category', 'Billing Cycle', 'SKU', 'Price', 'Tax %', 'Stock'],
-    rows.map((i, idx) => [idx + 1, i.name, i.category || '', i.billing_cycle, i.sku || '', i.price, i.tax_rate, i.stock ?? '']));
+    ['#', 'Name', 'Category', 'Billing Cycle', 'SKU', 'Price', 'Stock'],
+    rows.map((i, idx) => [idx + 1, i.name, i.category || '', i.billing_cycle, i.sku || '', i.price, i.stock ?? '']));
   let timer;
   $('#item-search').oninput = (e) => { clearTimeout(timer); timer = setTimeout(() => renderItems(e.target.value), 250); };
   $('#item-cat').onchange = (e) => { itemCatFilter = e.target.value; renderItems(search); };
@@ -639,7 +638,7 @@ async function editInvoice(id) {
       <h3 class="card-title" style="margin:4px 0 8px">${t('Items')}</h3>
       <div style="overflow-x:auto">
         <table class="line-table" style="min-width:700px">
-          <thead><tr><th class="col-desc">${t('Item / Description')}</th><th>${t('Qty')}</th><th>${t('Price')}</th><th>${t('Service Start')}</th><th>${t('Expiry Date')}</th><th class="num">${t('Amount')}</th><th></th></tr></thead>
+          <thead><tr><th class="col-desc">${t('Item')}</th><th>${t('Qty')}</th><th>${t('Price')}</th><th>${t('Service Start')}</th><th>${t('Expiry Date')}</th><th class="num">${t('Amount')}</th><th></th></tr></thead>
           <tbody id="line-rows"></tbody>
         </table>
       </div>
@@ -669,7 +668,7 @@ async function editInvoice(id) {
           <select class="l-item"><option value="">${t('— select —')}</option>
             ${items.map((i) => `<option value="${i.id}">${esc(i.name)}</option>`).join('')}
           </select>
-          <input class="l-desc" placeholder="${t('Description')}" value="${esc(line.description || '')}" style="margin-top:4px">
+          <input class="l-desc" type="hidden" value="${esc(line.description || '')}">
         </td>
         <td><input class="l-qty" type="number" step="0.01" style="width:70px" value="${line.quantity ?? 1}"></td>
         <td><input class="l-price" type="number" step="0.01" style="width:90px" value="${line.unit_price ?? 0}"></td>
@@ -1006,9 +1005,9 @@ route('renewals', async () => {
 /* ============================================================
    Payments (global list)
    ============================================================ */
-const PAY_METHODS = ['paypal', 'debitcard', 'bank'];
-const methodIcon = { paypal: '🅿️', debitcard: '💳', bank: '🏦' };
-const METHOD_LABELS = { paypal: 'PayPal', debitcard: 'Debit Card', bank: 'Bank' };
+const PAY_METHODS = ['kpay', 'wavepay', 'bank', 'paypal', 'wise'];
+const methodIcon = { kpay: '💙', wavepay: '🌊', bank: '🏦', paypal: '🅿️', wise: '💠' };
+const METHOD_LABELS = { kpay: 'KPay', wavepay: 'Wave Pay', bank: 'Bank', paypal: 'PayPal', wise: 'Wise' };
 const methodLabel = (m) => (LANG === 'my' ? (MM[m] || METHOD_LABELS[m] || m) : (METHOD_LABELS[m] || m));
 let payMethod = '';
 let paySearch = '';
@@ -1216,10 +1215,7 @@ route('settings', async () => {
 
     <div class="card" style="max-width:720px;margin-top:18px">
       <h3 class="card-title">${t('Company Details')}</h3>
-      <div class="form-row">
-        <div class="field"><label>Company Name</label><input id="s-name" value="${f('company_name')}"></div>
-        <div class="field"><label>Tax Number</label><input id="s-tax" value="${f('tax_number')}"></div>
-      </div>
+      <div class="field"><label>Company Name</label><input id="s-name" value="${f('company_name')}"></div>
       <div class="form-row">
         <div class="field"><label>Email</label><input id="s-email" value="${f('email')}"></div>
         <div class="field"><label>Phone</label><input id="s-phone" value="${f('phone')}"></div>
@@ -1240,19 +1236,12 @@ route('settings', async () => {
         <div class="field"><label>Numbering</label><div class="muted" style="font-size:12px;padding-top:8px">Automatic: <code>INV-YYYY-XXXX</code> (per-year sequence, no gaps)</div></div>
       </div>
 
-      <h3 class="card-title" style="margin-top:20px">German Tax Compliance (Finanzamt)</h3>
-      <div class="field">
-        <label><input type="checkbox" id="s-klein" ${s.is_kleinunternehmer ? 'checked' : ''}> Kleinunternehmer (§ 19 UStG) — no VAT charged on any invoice</label>
-      </div>
-      <div class="muted" style="font-size:12px;margin:-4px 0 10px">Non-EU clients (e.g. Myanmar) are always VAT-exempt (§ 3a Abs. 2 UStG) regardless of this setting.</div>
+      <h3 class="card-title" style="margin-top:20px">Bank Details</h3>
       <div class="form-row">
-        <div class="field"><label>Bank Name</label><input id="s-bank-name" value="${f('bank_name')}"></div>
-        <div class="field"><label>Account Holder</label><input id="s-bank-holder" value="${f('bank_account_holder')}"></div>
+        <div class="field"><label>Pay Name</label><input id="s-bank-name" value="${f('bank_name')}"></div>
+        <div class="field"><label>Account Name</label><input id="s-bank-holder" value="${f('bank_account_holder')}"></div>
       </div>
-      <div class="form-row">
-        <div class="field"><label>IBAN</label><input id="s-bank-iban" value="${f('bank_iban')}"></div>
-        <div class="field"><label>BIC / SWIFT</label><input id="s-bank-bic" value="${f('bank_bic')}"></div>
-      </div>
+      <div class="field"><label>Account No</label><input id="s-bank-iban" value="${f('bank_iban')}"></div>
 
       <h3 class="card-title" style="margin-top:20px">${t('Language')} &amp; Theme</h3>
       <div class="form-row">
@@ -1313,14 +1302,13 @@ route('settings', async () => {
 
   $('#s-save').onclick = async () => {
     const payload = {
-      company_name: $('#s-name').value, tax_number: $('#s-tax').value, email: $('#s-email').value,
+      company_name: $('#s-name').value, email: $('#s-email').value,
       phone: $('#s-phone').value, address: $('#s-address').value, city: $('#s-city').value,
       country: $('#s-country').value, currency: $('#s-cur').value, currency_symbol: $('#s-sym').value,
       default_tax: $('#s-dtax').value, invoice_prefix: $('#s-prefix').value,
       language: $('#s-lang').value, logo_url: logoData,
-      is_kleinunternehmer: $('#s-klein').checked,
       bank_name: $('#s-bank-name').value, bank_account_holder: $('#s-bank-holder').value,
-      bank_iban: $('#s-bank-iban').value, bank_bic: $('#s-bank-bic').value,
+      bank_iban: $('#s-bank-iban').value,
     };
     try { SETTINGS = await put('/settings', payload); applyBranding(); toast('Settings saved', 'success'); }
     catch (e) { toast(e.message, 'error'); }
