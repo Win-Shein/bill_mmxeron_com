@@ -797,7 +797,7 @@ async function viewInvoice(id) {
         <div class="row"><span>${t('Paid')}</span><span class="mono">${money(inv.amount_paid)}</span></div>
         <div class="row" style="font-weight:700"><span>${t('Balance Due')}</span><span class="mono">${money(balance)}</span></div>
       </div>
-      ${isDraft ? `<div class="lock-note">${t('Draft — editable. Issue to lock and assign the official sequential invoice number.')}</div>` : ''}
+      ${isDraft ? `<div class="lock-note">${t('Draft — editable. Issue to lock this invoice.')}</div>` : ''}
       ${inv.payments.length ? `
         <h3 class="card-title" style="margin-top:20px">${t('Payments')}</h3>
         <table>
@@ -840,7 +840,7 @@ async function viewInvoice(id) {
   if (rp) rp.onclick = () => recordPayment(inv);
   const issueBtn = $('#issue-inv');
   if (issueBtn) issueBtn.onclick = async () => {
-    if (!confirm('Issue this invoice? It will be locked and assigned an official sequential number. This cannot be undone.')) return;
+    if (!confirm('Issue this invoice? It will be locked and cannot be undone.')) return;
     try {
       await post('/invoices/' + inv.id + '/issue');
       toast('Invoice issued', 'success'); closeModal(); renderInvoices();
@@ -1233,7 +1233,7 @@ route('settings', async () => {
       </div>
       <div class="form-row">
         <div class="field"><label>Invoice Prefix</label><input id="s-prefix" value="${f('invoice_prefix')}"></div>
-        <div class="field"><label>Numbering</label><div class="muted" style="font-size:12px;padding-top:8px">Automatic: <code>INV-YYYY-XXXX</code> (per-year sequence, no gaps)</div></div>
+        <div class="field"><label>Numbering</label><div class="muted" style="font-size:12px;padding-top:8px">Automatic: <code>INV-YYYY-XXXX</code> (assigned when the invoice is created)</div></div>
       </div>
 
       <h3 class="card-title" style="margin-top:20px">Bank Details</h3>

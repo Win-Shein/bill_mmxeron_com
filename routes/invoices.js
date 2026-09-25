@@ -3,7 +3,7 @@
 const express = require('express');
 const db = require('../db/database');
 const {
-  recalcInvoice, replaceLineItems, draftInvoiceNo, issueInvoice, cancelInvoice,
+  recalcInvoice, replaceLineItems, nextInvoiceNo, issueInvoice, cancelInvoice,
 } = require('../lib/invoiceService');
 const { buildInvoicePdf } = require('../lib/pdf');
 
@@ -59,10 +59,9 @@ router.get('/:id', (req, res) => {
   res.json(inv);
 });
 
-// Create — always starts as an editable DRAFT. Drafts get a temporary
-// placeholder invoice number; the real sequential number is only assigned
-// when the invoice is issued (see POST /:id/issue), so deleting a draft
-// never leaves a gap in the legal numbering sequence (GoBD).
+// Create — always starts as an editable DRAFT. The sequential invoice number
+// is reserved at creation time so every invoice (draft included) has a real
+// number, e.g. INV-2026-0001, and can be handed to a client immediately.
 router.post('/', (req, res) => {
   const b = req.body;
   if (!b.customer_id) return res.status(400).json({ error: 'customer_id is required' });
@@ -70,8 +69,10 @@ router.post('/', (req, res) => {
   if (!customer) return res.status(400).json({ error: 'Customer not found' });
 
   const settings = db.prepare('SELECT * FROM settings WHERE org_id = ?').get(req.orgId);
+  const issueDate = b.issue_date || new Date().toISOString().slice(0, 10);
 
   const create = db.transaction(() => {
+    const invoiceNo = nextInvoiceNo(req.orgId, issueDate.slice(0, 4));
     const info = db
       .prepare(
         `INSERT INTO invoices
@@ -82,9 +83,9 @@ router.post('/', (req, res) => {
       )
       .run({
         org: req.orgId,
-        invoice_no: draftInvoiceNo(),
+        invoice_no: invoiceNo,
         customer_id: b.customer_id,
-        issue_date: b.issue_date || new Date().toISOString().slice(0, 10),
+        issue_date: issueDate,
         due_date: b.due_date || null,
         currency: b.currency || settings.currency,
         discount: Number(b.discount) || 0,
@@ -120,9 +121,14 @@ router.put('/:id', (req, res) => {
   }
 
   const update = db.transaction(() => {
+    const issueDate = b.issue_date ?? existing.issue_date;
+    // Assign a real number to a legacy placeholder draft on first edit.
+    const invoiceNo = /^DRAFT-/i.test(String(existing.invoice_no || ''))
+      ? nextInvoiceNo(req.orgId, String(issueDate || new Date().toISOString().slice(0, 10)).slice(0, 4))
+      : existing.invoice_no;
     db.prepare(
       `UPDATE invoices
-         SET customer_id=@customer_id, issue_date=@issue_date, due_date=@due_date,
+         SET invoice_no=@invoice_no, customer_id=@customer_id, issue_date=@issue_date, due_date=@due_date,
              status=@status, currency=@currency, discount=@discount, notes=@notes, terms=@terms,
              client_country=@client_country, service_period_start=@service_period_start,
              service_period_end=@service_period_end,
@@ -130,8 +136,9 @@ router.put('/:id', (req, res) => {
        WHERE id=@id AND org_id=@org`
     ).run({
       id: req.params.id, org: req.orgId,
+      invoice_no: invoiceNo,
       customer_id: b.customer_id ?? existing.customer_id,
-      issue_date: b.issue_date ?? existing.issue_date,
+      issue_date: issueDate,
       due_date: b.due_date ?? existing.due_date,
       status: b.status ?? existing.status,
       currency: b.currency ?? existing.currency,

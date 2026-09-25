@@ -102,6 +102,21 @@ test('invoice lifecycle: issue assigns INV-YYYY-XXXX and locks the invoice', () 
   assert.strictEqual(issued.issuer_tax_number, 'DE 123 456 789');
 });
 
+test('invoice lifecycle: an already-numbered draft keeps its number on issue', () => {
+  const orgId = seedOrg();
+  const custId = seedCustomer(orgId);
+  const id = db.prepare(
+    `INSERT INTO invoices (org_id, invoice_no, customer_id, issue_date, status, currency,
+                           client_country, service_period_start, service_period_end)
+     VALUES (?, 'INV-2026-0042', ?, '2026-09-01', 'draft', 'USD', 'Myanmar', '2026-09-01', '2026-09-30')`
+  ).run(orgId, custId).lastInsertRowid;
+  replaceLineItems(id, [{ description: 'Consulting', quantity: 1, unit_price: 100, tax_rate: 0 }]);
+  recalcInvoice(id);
+
+  const issued = issueInvoice(id, orgId);
+  assert.strictEqual(issued.invoice_no, 'INV-2026-0042');
+});
+
 test('invoice lifecycle: VAT exemption zeroes line-item tax on issue', () => {
   const orgId = seedOrg();
   const custId = seedCustomer(orgId);
